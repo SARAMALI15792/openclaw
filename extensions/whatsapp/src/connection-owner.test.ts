@@ -192,15 +192,22 @@ describe("WhatsApp connection owner", () => {
     it("cancels a replacement that is waiting on incumbent cleanup", async () => {
       const authDir = await createAuthDir();
       const incumbent = await acquireWhatsAppGatewayConnectionOwner(authDir);
-      incumbent.setCleanupRetry(async () => {
+      const cleanupStarted = createDeferred<void>();
+      const retry = vi.fn(async () => {
+        cleanupStarted.resolve();
         throw new Error("still draining");
       });
+      incumbent.setCleanupRetry(retry);
       const abortController = new AbortController();
 
       const replacement = acquireWhatsAppGatewayConnectionOwner(authDir, abortController.signal);
+      const outcome = expect(replacement).rejects.toThrow("shutdown");
+      // Abort only once the replacement is inside the incumbent cleanup wait.
+      await cleanupStarted.promise;
       abortController.abort(new Error("shutdown"));
 
-      await expect(replacement).rejects.toThrow("shutdown");
+      await outcome;
+      expect(retry).toHaveBeenCalledOnce();
       await incumbent.release();
     });
 
